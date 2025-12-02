@@ -1,0 +1,5 @@
+{
+  "name": "Traveler.Ai",
+  "description": "An intelligent travel companion to manage trips, track expenses with visual analytics, and plan itineraries using Gemini AI.",
+  "requestFramePermissions": []
+}
