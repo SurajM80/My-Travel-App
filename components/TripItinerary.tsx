@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Trip, Activity } from '../types';
 import { Plus, CheckCircle, Circle, Trash2, Calendar, MinusCircle, Loader2 } from 'lucide-react';
 import { Button } from './Button';
+import { addDays, getDaysArray } from '../utils/dateUtils';
 
 interface TripItineraryProps {
   trip: Trip;
@@ -10,6 +11,7 @@ interface TripItineraryProps {
   onDeleteActivity: (id: string) => void;
   onToggleActivity: (id: string) => void;
   onTripUpdate: (tripId: string, newStart: string, newEnd: string) => Promise<void>;
+  onRemoveDay: (dateStr: string) => Promise<void>;
 }
 
 export const TripItinerary: React.FC<TripItineraryProps> = ({ 
@@ -18,53 +20,13 @@ export const TripItinerary: React.FC<TripItineraryProps> = ({
   onAddActivity, 
   onDeleteActivity, 
   onToggleActivity,
-  onTripUpdate
+  onTripUpdate,
+  onRemoveDay
 }) => {
   const [newActivity, setNewActivity] = useState<{date: string, desc: string}>({ date: '', desc: '' });
   const [activeDateInput, setActiveDateInput] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-
-  // Helper to safely add/subtract days avoiding timezone issues by manually parsing YYYY-MM-DD
-  const addDays = (dateStr: string, daysToAdd: number): string => {
-    // 1. Parse manually to avoid local timezone interference
-    const parts = dateStr.split('-');
-    const year = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10) - 1; // JS months are 0-11
-    const day = parseInt(parts[2], 10);
-
-    // 2. Create UTC Date
-    const date = new Date(Date.UTC(year, month, day)); 
-    
-    // 3. Adjust days in UTC
-    date.setUTCDate(date.getUTCDate() + daysToAdd);
-    
-    // 4. Return string in YYYY-MM-DD format
-    return date.toISOString().split('T')[0];
-  };
-
-  // Helper to generate dates between start and end
-  const getDaysArray = (start: string, end: string) => {
-    const arr = [];
-    
-    // Parse start date
-    const [sY, sM, sD] = start.split('-').map(Number);
-    const dt = new Date(Date.UTC(sY, sM - 1, sD));
-    
-    // Parse end date
-    const [eY, eM, eD] = end.split('-').map(Number);
-    const endDt = new Date(Date.UTC(eY, eM - 1, eD));
-    
-    // Safety check
-    if (isNaN(dt.getTime()) || isNaN(endDt.getTime())) return [];
-    
-    // Loop while dt is on or before endDt
-    while (dt.getTime() <= endDt.getTime()) {
-      arr.push(new Date(dt));
-      // Increment using UTC to stay consistent
-      dt.setUTCDate(dt.getUTCDate() + 1);
-    }
-    return arr;
-  };
+  const [deletingDate, setDeletingDate] = useState<string | null>(null);
 
   const days = getDaysArray(trip.startDate, trip.endDate);
 
@@ -79,32 +41,29 @@ export const TripItinerary: React.FC<TripItineraryProps> = ({
   const handleExtendTrip = async () => {
     if (isUpdating) return;
     setIsUpdating(true);
-    const newEnd = addDays(trip.endDate, 1);
-    await onTripUpdate(trip.id, trip.startDate, newEnd);
-    setIsUpdating(false);
+    try {
+      const newEnd = addDays(trip.endDate, 1);
+      await onTripUpdate(trip.id, trip.startDate, newEnd);
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   // Function to remove a specific day
-  const handleRemoveDay = async (isFirst: boolean, isLast: boolean) => {
+  const handleRemoveClick = async (dateStr: string, index: number) => {
     if (days.length <= 1) {
       alert("A trip must have at least one day.");
       return;
     }
-    if (isUpdating) return;
+    if (isUpdating || deletingDate) return;
 
-    setIsUpdating(true);
-    try {
-      if (isFirst) {
-        // Remove First Day -> New Start Date is next day
-        const newStart = addDays(trip.startDate, 1);
-        await onTripUpdate(trip.id, newStart, trip.endDate);
-      } else if (isLast) {
-        // Remove Last Day -> New End Date is prev day
-        const newEnd = addDays(trip.endDate, -1);
-        await onTripUpdate(trip.id, trip.startDate, newEnd);
+    if(confirm(`Remove Day ${index + 1} (${dateStr})?\n\nThis will delete activities on this day and adjust the itinerary.`)) {
+      setDeletingDate(dateStr);
+      try {
+        await onRemoveDay(dateStr);
+      } finally {
+        setDeletingDate(null);
       }
-    } finally {
-      setIsUpdating(false);
     }
   };
 
@@ -125,10 +84,7 @@ export const TripItinerary: React.FC<TripItineraryProps> = ({
           ) : days.map((dateObj, index) => {
             const dateStr = dateObj.toISOString().split('T')[0];
             const dayActivities = activities.filter(a => a.date === dateStr);
-            const isFirstDay = index === 0;
-            const isLastDay = index === days.length - 1;
-            // Only allow deleting the first or last day to keep dates contiguous
-            const canDeleteDay = isFirstDay || isLastDay;
+            const isDeletingThis = deletingDate === dateStr;
             
             return (
               <div key={dateStr} className="relative pl-8 border-l-2 border-indigo-100 last:border-0 pb-2">
@@ -151,27 +107,25 @@ export const TripItinerary: React.FC<TripItineraryProps> = ({
                       + Add Activity
                     </button>
 
-                    {/* Delete Day Button (Only if Start or End) */}
-                    {canDeleteDay && days.length > 1 && (
+                    {/* Delete Day Button (Any Day) */}
+                    {days.length > 1 && (
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          if(confirm(`Remove Day ${index + 1} (${dateStr})? \n\nThis will remove this day from your trip duration.`)) {
-                            handleRemoveDay(isFirstDay, isLastDay);
-                          }
+                          handleRemoveClick(dateStr, index);
                         }}
-                        disabled={isUpdating}
+                        disabled={!!deletingDate || isUpdating}
                         className="text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors p-1.5 rounded disabled:opacity-50"
-                        title="Remove this day from trip duration"
+                        title="Remove this day"
                       >
-                         {isUpdating ? <Loader2 size={18} className="animate-spin" /> : <MinusCircle size={18} />}
+                         {isDeletingThis ? <Loader2 size={18} className="animate-spin" /> : <MinusCircle size={18} />}
                       </button>
                     )}
                   </div>
                 </div>
 
                 {/* List of Activities for this day */}
-                <div className="space-y-2 mb-3">
+                <div className={`space-y-2 mb-3 transition-opacity duration-300 ${isDeletingThis ? 'opacity-50' : ''}`}>
                   {dayActivities.length === 0 && activeDateInput !== dateStr && (
                     <p className="text-sm text-gray-400 italic">No activities planned yet.</p>
                   )}
@@ -200,7 +154,7 @@ export const TripItinerary: React.FC<TripItineraryProps> = ({
                 </div>
 
                 {/* Input Form for this day */}
-                {activeDateInput === dateStr && (
+                {activeDateInput === dateStr && !isDeletingThis && (
                   <div className="flex gap-2 animate-fade-in mt-2">
                     <input
                       autoFocus
@@ -229,8 +183,8 @@ export const TripItinerary: React.FC<TripItineraryProps> = ({
 
         {/* Extend Trip Button */}
         <div className="mt-8 pt-6 border-t border-gray-100 flex justify-center">
-            <Button variant="secondary" onClick={handleExtendTrip} disabled={isUpdating} className="w-full md:w-auto">
-               {isUpdating ? <Loader2 className="animate-spin h-4 w-4" /> : <Plus size={16} />}
+            <Button variant="secondary" onClick={handleExtendTrip} disabled={isUpdating || !!deletingDate} className="w-full md:w-auto">
+               {isUpdating && !deletingDate ? <Loader2 className="animate-spin h-4 w-4" /> : <Plus size={16} />}
                Extend Trip (Add Day)
             </Button>
         </div>

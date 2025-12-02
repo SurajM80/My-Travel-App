@@ -17,7 +17,8 @@ import {
   Copy,
   Check,
   Edit2,
-  X
+  X,
+  Download
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from 'recharts';
 import { Trip, Expense, ExpenseCategory, ViewState, User, Activity } from './types';
@@ -27,6 +28,8 @@ import { AIPlanner } from './components/AIPlanner';
 import { AuthForm } from './components/AuthForm';
 import { TripItinerary } from './components/TripItinerary';
 import { supabase } from './services/supabaseClient';
+import { generateTripPDF } from './services/pdfService';
+import { addDays } from './utils/dateUtils';
 
 // ---- Constants & Utils ----
 const CHART_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6'];
@@ -421,6 +424,72 @@ export default function App() {
     }
   };
 
+  // Handle Remove Day (Advanced logic to shift dates)
+  const handleRemoveDay = async (dateToRemove: string) => {
+    if (!activeTrip) return;
+
+    console.log(`Removing day ${dateToRemove} from trip ${activeTrip.destination}`);
+    
+    try {
+      const isStart = dateToRemove === activeTrip.startDate;
+      const isEnd = dateToRemove === activeTrip.endDate;
+
+      // 1. Delete activities on the specific date
+      const { error: delError } = await supabase
+        .from('activities')
+        .delete()
+        .eq('trip_id', activeTrip.id)
+        .eq('date', dateToRemove);
+      
+      if (delError) throw delError;
+
+      // 2. Logic to shift days and update Trip dates
+      if (isStart) {
+        // Just move Start Date forward. Day 2 becomes Day 1 (content stays on Day 2 date, but logically becomes first day).
+        const newStartDate = addDays(activeTrip.startDate, 1);
+        await handleUpdateTripDates(activeTrip.id, newStartDate, activeTrip.endDate);
+      } else if (isEnd) {
+        // Just move End Date backward.
+        const newEndDate = addDays(activeTrip.endDate, -1);
+        await handleUpdateTripDates(activeTrip.id, activeTrip.startDate, newEndDate);
+      } else {
+        // Middle Day Deletion: Must shift all subsequent activities backwards to fill the gap.
+        
+        // A. Fetch activities that need shifting
+        const { data: actsToShift, error: fetchError } = await supabase
+          .from('activities')
+          .select('*')
+          .eq('trip_id', activeTrip.id)
+          .gt('date', dateToRemove);
+
+        if (fetchError) throw fetchError;
+
+        // B. Update each activity (shift back by 1 day)
+        // Note: Supabase doesn't support batch update with calculated fields easily in JS client, so we iterate.
+        if (actsToShift && actsToShift.length > 0) {
+           await Promise.all(actsToShift.map(act => {
+             const newDate = addDays(act.date, -1);
+             return supabase
+               .from('activities')
+               .update({ date: newDate })
+               .eq('id', act.id);
+           }));
+        }
+
+        // C. Reduce Trip Duration (bring End Date back by 1)
+        const newEndDate = addDays(activeTrip.endDate, -1);
+        await handleUpdateTripDates(activeTrip.id, activeTrip.startDate, newEndDate);
+      }
+
+      // 3. Refresh data to ensure UI sync
+      await fetchData();
+
+    } catch (error: any) {
+      console.error("Error removing day:", error);
+      alert(`Failed to remove day: ${error.message}`);
+    }
+  };
+
   // Update Trip Budget
   const handleUpdateBudget = async () => {
     if (!activeTrip) return;
@@ -658,6 +727,14 @@ export default function App() {
             </p>
           </div>
           <div className="flex gap-2">
+            <button 
+              onClick={() => generateTripPDF(activeTrip, activeTripExpenses, activeTripActivities)}
+              className="flex items-center gap-2 bg-white text-gray-700 border border-gray-300 px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400"
+              title="Download PDF Summary"
+            >
+              <Download size={18} />
+              <span className="hidden sm:inline">Export</span>
+            </button>
             <Button variant="secondary" onClick={() => setIsExpenseModalOpen(true)}>
               <Plus size={18} /> Add Expense
             </Button>
@@ -737,6 +814,7 @@ export default function App() {
           onDeleteActivity={handleDeleteActivity}
           onToggleActivity={handleToggleActivity}
           onTripUpdate={handleUpdateTripDates}
+          onRemoveDay={handleRemoveDay}
         />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
