@@ -8,8 +8,6 @@ export default defineConfig(({ mode }) => {
     define: {
       // safely expose API_KEY to the client
       'process.env.API_KEY': JSON.stringify(env.API_KEY || process.env.API_KEY),
-      // prevent crashes when accessing other process.env props
-      'process.env': {} 
     },
     build: {
       outDir: 'dist',

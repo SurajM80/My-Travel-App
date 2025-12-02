@@ -1,7 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = 'https://dwjwwaioqcsvchtimebr.supabase.co';
-const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3and3YWlvcWNzdmNodGltZWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI4MzAsImV4cCI6MjA4MDI1ODgzMH0.7E_XZTRt80pPm-HT9rzwU1QmjnLzvFOcYuPtkbTagS0';
+// Use environment variables for configuration with safety checks
+// In Vite, env vars are exposed via import.meta.env
+// We use optional chaining (?.) and a fallback object to prevent crashes if import.meta.env is undefined
+const env = (import.meta.env || {}) as any;
+const supabaseUrl = env.VITE_SUPABASE_URL || 'https://dwjwwaioqcsvchtimebr.supabase.co';
+const supabaseKey = env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR3and3YWlvcWNzdmNodGltZWJyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2ODI4MzAsImV4cCI6MjA4MDI1ODgzMH0.7E_XZTRt80pPm-HT9rzwU1QmjnLzvFOcYuPtkbTagS0';
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
